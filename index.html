@@ -653,7 +653,7 @@ function calculate() {
   displayDate.textContent = `Today’s Allocation — ${pretty(planDate.value)}`;
 
   let total = 0, available = 0, required = 0, notRequired = 0, volume = 0;
-  let warnings = [];
+  let warningMessages = [];
   const incoming = {};
   plants.forEach(p => incoming[p.name] = []);
 
@@ -729,10 +729,10 @@ function calculate() {
       status.classList.add("warn");
     }
 
-    if (u > t) warnings.push(`${plant}: unavailable trucks is greater than total trucks.`);
-    if (tr > 0 && tr > Math.max(a + h - r, 0)) warnings.push(`${plant}: transferred trucks exceed surplus trucks.`);
-    if (tr > 0 && loc && !normalisePlantName(loc)) warnings.push(`${plant}: transferred location does not match a plant.`);
-    if (v > 0 && r === 0) warnings.push(`${plant}: volume entered but trucks required is zero.`);
+    if (u > t) warningMessages.push(`${plant}: unavailable trucks is greater than total trucks.`);
+    if (tr > 0 && tr > Math.max(a + h - r, 0)) warningMessages.push(`${plant}: transferred trucks exceed surplus trucks.`);
+    if (tr > 0 && loc && !normalisePlantName(loc)) warningMessages.push(`${plant}: transferred location does not match a plant.`);
+    if (v > 0 && r === 0) warningMessages.push(`${plant}: volume entered but trucks required is zero.`);
 
     total += t;
     available += effectiveAvailable;
@@ -766,7 +766,7 @@ function calculate() {
   capacityBar.style.width = `${pct}%`;
 
   warnings.innerHTML = "";
-  (warnings.length ? warnings : ["No current alerts."]).forEach(w => {
+  (warningMessages.length ? warningMessages : ["No current alerts."]).forEach(w => {
     const li = document.createElement("li");
     li.textContent = w;
     warnings.appendChild(li);
@@ -1052,6 +1052,16 @@ setupJobLines();
 enableJobTextareas();
 loadPlan(planDate.value);
 setTimeout(loadEmbeddedWebsitePlan, 50);
+function forceAutoSaveSetup(){
+  const inputs = document.querySelectorAll('input, textarea, select');
+  inputs.forEach(el => {
+    el.addEventListener('input', () => { calculate(); autoSavePlan(); });
+    el.addEventListener('change', () => { calculate(); autoSavePlan(); });
+  });
+}
+setTimeout(forceAutoSaveSetup, 200);
+setTimeout(() => loadPlan(planDate.value), 500);
+
 </script>
 
 <style>
