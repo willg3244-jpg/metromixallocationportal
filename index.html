@@ -473,6 +473,69 @@ select {
 </style>
 <script id="embeddedPlanData">window.__METROMIX_EMBEDDED_PLAN__ = null;</script>
 
+
+<script>
+window.metromixLocalToday = function () {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+</script>
+
+
+
+
+
+<style>
+.date-nav-wrap{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  justify-content:flex-start;
+  flex-wrap:nowrap;
+}
+.date-nav-wrap input[type="date"],
+#planDate{
+  max-width:165px;
+  width:165px;
+  padding:8px 10px;
+  font-size:14px;
+}
+.date-nav-btn{
+  border:0;
+  border-radius:999px;
+  background:#111;
+  color:#fff;
+  font-weight:900;
+  width:34px;
+  height:34px;
+  padding:0;
+  line-height:34px;
+  text-align:center;
+  cursor:pointer;
+  box-shadow:0 3px 8px rgba(0,0,0,.16);
+  font-size:16px;
+}
+.date-nav-btn:hover{
+  background:#333;
+}
+#sydneyWeatherLine{
+  margin-top:8px;
+  color:#ffc629;
+  font-weight:900;
+  font-size:14px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+#sydneyWeatherIcon{
+  font-size:19px;
+  line-height:1;
+}
+</style>
+
 </head>
 <body>
 <header>
@@ -482,7 +545,13 @@ select {
     <p>Daily truck planning dashboard</p>
   </div>
   <div class="actions">
-    <input type="date" id="planDate">
+    
+<div class="date-nav-wrap">
+  <input type="date" id="planDate">
+  <button type="button" class="date-nav-btn" id="prevDayBtn" title="Previous day">‹</button>
+  <button type="button" class="date-nav-btn" id="nextDayBtn" title="Next day">›</button>
+</div>
+
     
     
     <button class="dark" onclick="duplicatePlan()">Duplicate</button>
@@ -498,7 +567,8 @@ select {
           <h2 id="displayDate">Today’s Allocation</h2>
           <p>Simple dashboard view. Open the sections below when you need to edit details.</p>
         </div>
-      </div>
+      <div id="sydneyWeatherLine"><span id="sydneyWeatherIcon">☁️</span><span id="sydneyWeatherText">Sydney weather: loading...</span></div>
+</div>
       <div class="metrics">
         <div class="metric"><span>M3 Scheduled</span><strong id="m3Label">0.00</strong></div>
         <div class="metric"><span>Total Trucks</span><strong id="totalTrucks">42</strong></div>
@@ -575,7 +645,7 @@ const plants = [
 ];
 
 const prefix = "metromix-v5-simple-";
-function today() { return new Date().toISOString().slice(0,10); }
+function today() { return window.metromixLocalToday(); }
 function pretty(d) { return new Date(d+"T00:00:00").toLocaleDateString("en-AU", { weekday:"long", day:"numeric", month:"long", year:"numeric" }); }
 planDate.value = today();
 
@@ -1140,7 +1210,7 @@ function removeOldButtons(){
 function getDateKey(){
   const dateEl = document.getElementById("planDate") || document.querySelector('input[type="date"]');
   if(dateEl && dateEl.value) return dateEl.value;
-  return new Date().toISOString().slice(0,10);
+  return window.metromixLocalToday();
 }
 
 function storageKey(){
@@ -1310,6 +1380,150 @@ window.addEventListener("load", async ()=>{
   setInterval(removeOldButtons, 1000);
 });
 </script>
+
+
+<script>
+window.addEventListener("load", function () {
+  const today = window.metromixLocalToday();
+  const dateBox = document.getElementById("planDate") || document.querySelector('input[type="date"]');
+
+  if (dateBox && dateBox.value !== today) {
+    dateBox.value = today;
+    dateBox.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+});
+</script>
+
+
+
+<script>
+(function(){
+  let weatherCache = null;
+  let weatherCacheAt = 0;
+
+  function localToday(){
+    if (window.metromixLocalToday) return window.metromixLocalToday();
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+
+  function getDateBox(){
+    return document.getElementById("planDate") || document.querySelector('input[type="date"]');
+  }
+
+  function selectedDate(){
+    const dateBox = getDateBox();
+    return dateBox && dateBox.value ? dateBox.value : localToday();
+  }
+
+  function shiftDate(days){
+    const dateBox = getDateBox();
+    if(!dateBox) return;
+
+    const current = dateBox.value || localToday();
+    const parts = current.split("-");
+    const d = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    d.setDate(d.getDate() + days);
+
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    const dd = String(d.getDate()).padStart(2,"0");
+
+    dateBox.value = `${yyyy}-${mm}-${dd}`;
+    dateBox.dispatchEvent(new Event("change", { bubbles:true }));
+    loadSydneyWeather();
+  }
+
+  function weatherIcon(code){
+    const iconMap = {
+      0:"☀️",1:"🌤️",2:"⛅",3:"☁️",
+      45:"🌫️",48:"🌫️",
+      51:"🌦️",53:"🌦️",55:"🌦️",
+      61:"🌧️",63:"🌧️",65:"🌧️",
+      80:"🌦️",81:"🌦️",82:"⛈️",
+      95:"⛈️",96:"⛈️",99:"⛈️"
+    };
+    return iconMap[code] || "🌡️";
+  }
+
+  function weatherLabel(code){
+    const codeMap = {
+      0:"Clear",1:"Mainly clear",2:"Partly cloudy",3:"Cloudy",
+      45:"Fog",48:"Fog",51:"Drizzle",53:"Drizzle",55:"Drizzle",
+      61:"Rain",63:"Rain",65:"Heavy rain",80:"Showers",81:"Showers",82:"Heavy showers",
+      95:"Thunderstorm",96:"Thunderstorm",99:"Thunderstorm"
+    };
+    return codeMap[code] || "Weather updated";
+  }
+
+  function formatDayLabel(dateStr){
+    const today = localToday();
+    if(dateStr === today) return "Today";
+
+    const d = new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString("en-AU", { weekday:"short", day:"numeric", month:"short" });
+  }
+
+  async function fetchWeather(){
+    const now = Date.now();
+    if(weatherCache && now - weatherCacheAt < 20 * 60 * 1000){
+      return weatherCache;
+    }
+
+    const url = "https://api.open-meteo.com/v1/forecast?latitude=-33.8688&longitude=151.2093&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&current=temperature_2m,precipitation,weather_code&timezone=Australia%2FSydney&forecast_days=10";
+    const res = await fetch(url);
+    weatherCache = await res.json();
+    weatherCacheAt = now;
+    return weatherCache;
+  }
+
+  async function loadSydneyWeather(){
+    const line = document.getElementById("sydneyWeatherLine");
+    const iconEl = document.getElementById("sydneyWeatherIcon");
+    const textEl = document.getElementById("sydneyWeatherText") || line;
+    if(!line || !textEl) return;
+
+    try{
+      const dateStr = selectedDate();
+      const data = await fetchWeather();
+
+      const times = data.daily?.time || [];
+      const idx = times.indexOf(dateStr);
+
+      if(idx >= 0){
+        const code = data.daily.weather_code[idx];
+        const max = Math.round(data.daily.temperature_2m_max[idx]);
+        const min = Math.round(data.daily.temperature_2m_min[idx]);
+        const rain = data.daily.precipitation_sum[idx];
+
+        if(iconEl) iconEl.textContent = weatherIcon(code);
+        textEl.textContent = `Sydney weather ${formatDayLabel(dateStr)}: ${min}–${max}°C, ${weatherLabel(code)}${rain ? `, rain ${rain}mm` : ""}`;
+      } else {
+        if(iconEl) iconEl.textContent = "📅";
+        textEl.textContent = `Sydney weather: forecast unavailable for ${formatDayLabel(dateStr)}`;
+      }
+    }catch(e){
+      console.warn("Weather failed", e);
+      if(iconEl) iconEl.textContent = "⚠️";
+      textEl.textContent = "Sydney weather: unavailable";
+    }
+  }
+
+  window.addEventListener("load", function(){
+    const prev = document.getElementById("prevDayBtn");
+    const next = document.getElementById("nextDayBtn");
+    const dateBox = getDateBox();
+
+    if(prev) prev.addEventListener("click", function(){ shiftDate(-1); });
+    if(next) next.addEventListener("click", function(){ shiftDate(1); });
+    if(dateBox) dateBox.addEventListener("change", loadSydneyWeather);
+
+    loadSydneyWeather();
+    setInterval(loadSydneyWeather, 30 * 60 * 1000);
+  });
+})();
+</script>
+
 
 </body>
 </html>
