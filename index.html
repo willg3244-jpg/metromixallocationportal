@@ -1283,36 +1283,160 @@ async function initFirebase(){
   }
 }
 
+
+function globalTotalsKey(){
+  return "metromixAllocationPlan::GLOBAL_TOTAL_TRUCKS";
+}
+
+function getTotalTruckValues(){
+  ensureKeys();
+  const totals = {};
+  document.querySelectorAll('.edit-card').forEach((card, i) => {
+    const plant = card.dataset.plant || `plant-${i}`;
+    const totalInput = card.querySelector('[data-field="total"]');
+    if(totalInput) totals[plant] = totalInput.value;
+  });
+  return totals;
+}
+
+function applyTotalTruckValues(totals){
+  if(!totals) return;
+  document.querySelectorAll('.edit-card').forEach((card, i) => {
+    const plant = card.dataset.plant || `plant-${i}`;
+    const totalInput = card.querySelector('[data-field="total"]');
+    if(totalInput && Object.prototype.hasOwnProperty.call(totals, plant)){
+      totalInput.value = totals[plant];
+    }
+  });
+  if(typeof calculate === "function"){
+    try { calculate(); } catch(e){ console.warn("calculate after total load failed", e); }
+  }
+}
+
+function saveTotalTruckValuesLocal(){
+  try{
+    localStorage.setItem(globalTotalsKey(), JSON.stringify(getTotalTruckValues()));
+  }catch(e){
+    console.warn("Could not save global totals locally", e);
+  }
+}
+
+function loadTotalTruckValuesLocal(){
+  try{
+    const raw = localStorage.getItem(globalTotalsKey());
+    if(raw) applyTotalTruckValues(JSON.parse(raw));
+  }catch(e){
+    console.warn("Could not load global totals locally", e);
+  }
+}
+
+function clearDateSpecificFieldsOnly(){
+  ensureKeys();
+
+  fields().forEach(el => {
+    if(el.id === "planDate") return;
+    if(el.dataset.field === "total") return;
+
+    const type = (el.type || "").toLowerCase();
+
+    if(type === "checkbox" || type === "radio"){
+      el.checked = false;
+    } else if(type === "number"){
+      el.value = "0";
+    } else if(el.tagName === "SELECT"){
+      el.selectedIndex = 0;
+    } else {
+      el.value = "";
+    }
+  });
+
+  if(typeof calculate === "function"){
+    try { calculate(); } catch(e){ console.warn("calculate after clear failed", e); }
+  }
+}
+
+function extractSavedValues(record){
+  if(!record) return null;
+
+  // New clean save format
+  if(record.schemaVersion === 2 && record.values){
+    return record.values;
+  }
+
+  // Anything older than this version caused fields to copy across days.
+  // We intentionally ignore the old day-specific notes/jobs/review data.
+  return null;
+}
+
 async function loadData(){
   isLoading = true;
   removeOldButtons();
   status("Loading saved plan...");
 
-  // local browser copy first, so refresh works immediately
+  let loadedDateSpecificData = false;
+
+  // Start every date change by clearing everything except Total Trucks.
+  // This stops Plan Notes, Scheduled Jobs, End of Day Review and Future Dates
+  // from carrying into the next day.
+  clearDateSpecificFieldsOnly();
+
+  // Then re-apply the global Total Trucks section.
+  loadTotalTruckValuesLocal();
+
+  // Load this date's own saved information, if it exists in the new format.
   try{
-    const local = localStorage.getItem(storageKey());
-    if(local){
-      apply(JSON.parse(local));
-      status("Loaded saved plan");
+    const localRaw = localStorage.getItem(storageKey());
+    if(localRaw){
+      const parsed = JSON.parse(localRaw);
+      const values = extractSavedValues(parsed);
+      if(values){
+        apply(values);
+        loadedDateSpecificData = true;
+        status("Loaded saved plan");
+      }
     }
   }catch(e){
     console.warn("Local load failed", e);
   }
 
-  // then Firebase, if available
+  // Then check Firebase for this same date.
   if(firebaseReady){
     try{
       const snap = await getDoc(doc(db, "allocationPlans", getDateKey()));
       if(snap.exists()){
-        const values = snap.data().values || snap.data().data || {};
-        apply(values);
-        localStorage.setItem(storageKey(), JSON.stringify(values));
-        status("Loaded shared plan");
+        const values = extractSavedValues(snap.data());
+        if(values){
+          apply(values);
+          localStorage.setItem(storageKey(), JSON.stringify({
+            schemaVersion: 2,
+            values,
+            updated: new Date().toISOString()
+          }));
+          loadedDateSpecificData = true;
+          status("Loaded shared plan");
+        }
       }
+
+      // Load global total truck section from Firebase as well.
+      try{
+        const totalSnap = await getDoc(doc(db, "allocationGlobals", "truckTotals"));
+        if(totalSnap.exists()){
+          const totals = totalSnap.data().totals || {};
+          applyTotalTruckValues(totals);
+          localStorage.setItem(globalTotalsKey(), JSON.stringify(totals));
+        }
+      }catch(totalErr){
+        console.warn("Firebase total truck load failed:", totalErr);
+      }
+
     }catch(e){
       console.error("Firebase load failed:", e);
-      status("Loaded local plan");
+      status(loadedDateSpecificData ? "Loaded local plan" : "New blank day");
     }
+  }
+
+  if(!loadedDateSpecificData){
+    status("New blank day");
   }
 
   setTimeout(()=>{ isLoading = false; }, 500);
@@ -1321,22 +1445,34 @@ async function loadData(){
 async function saveData(){
   if(isLoading) return;
   removeOldButtons();
-  const values = collect();
 
-  // Always save locally first
+  const values = collect();
+  const totals = getTotalTruckValues();
+
+  // Save global Total Trucks separately so it is the ONLY section that carries between days.
+  saveTotalTruckValuesLocal();
+
+  const record = {
+    schemaVersion: 2,
+    values,
+    updated: new Date().toISOString()
+  };
+
+  // Always save this date locally first
   try{
-    localStorage.setItem(storageKey(), JSON.stringify(values));
+    localStorage.setItem(storageKey(), JSON.stringify(record));
     status("Auto-saved");
   }catch(e){
     console.error("Local save failed:", e);
     status("Local save failed");
   }
 
-  // Also save to Firebase when available
+  // Also save this date and the global Total Trucks section to Firebase when available
   if(firebaseReady){
     try{
-      await setDoc(doc(db, "allocationPlans", getDateKey()), {
-        values,
+      await setDoc(doc(db, "allocationPlans", getDateKey()), record);
+      await setDoc(doc(db, "allocationGlobals", "truckTotals"), {
+        totals,
         updated: new Date().toISOString()
       });
       status("Auto-saved to shared website");
@@ -1524,6 +1660,23 @@ window.addEventListener("load", function () {
 })();
 </script>
 
+
+
+<script>
+window.addEventListener("input", function(e){
+  if(e.target && e.target.matches('[data-field="total"]')){
+    try{
+      const totals = {};
+      document.querySelectorAll('.edit-card').forEach((card, i) => {
+        const plant = card.dataset.plant || `plant-${i}`;
+        const input = card.querySelector('[data-field="total"]');
+        if(input) totals[plant] = input.value;
+      });
+      localStorage.setItem("metromixAllocationPlan::GLOBAL_TOTAL_TRUCKS", JSON.stringify(totals));
+    }catch(err){}
+  }
+}, true);
+</script>
 
 </body>
 </html>
