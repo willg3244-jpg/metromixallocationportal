@@ -1441,6 +1441,7 @@ async function loadData(){
 
   setTimeout(()=>{ isLoading = false; }, 500);
 }
+window.metromixLoadSelectedDate = loadData;
 
 async function saveData(){
   if(isLoading) return;
@@ -1567,7 +1568,13 @@ window.addEventListener("load", function () {
 
     dateBox.value = `${yyyy}-${mm}-${dd}`;
     dateBox.dispatchEvent(new Event("change", { bubbles:true }));
-    loadSydneyWeather();
+
+    setTimeout(function(){
+      if (window.metromixLoadSelectedDate) {
+        window.metromixLoadSelectedDate();
+      }
+      loadSydneyWeather();
+    }, 100);
   }
 
   function weatherIcon(code){
@@ -1652,7 +1659,12 @@ window.addEventListener("load", function () {
 
     if(prev) prev.addEventListener("click", function(){ shiftDate(-1); });
     if(next) next.addEventListener("click", function(){ shiftDate(1); });
-    if(dateBox) dateBox.addEventListener("change", loadSydneyWeather);
+    if(dateBox) dateBox.addEventListener("change", function(){
+      if (window.metromixLoadSelectedDate) {
+        window.metromixLoadSelectedDate();
+      }
+      loadSydneyWeather();
+    });
 
     loadSydneyWeather();
     setInterval(loadSydneyWeather, 30 * 60 * 1000);
